@@ -23,10 +23,12 @@
          XML-HEADERS
          TEXT-HEADERS
          POST-FORM
+	 IMAGE-HEADERS
          html-requester
          json-requester
          xml-requester
          text-requester
+	 image-requester
          update-host
          update-headers
          update-port
@@ -51,7 +53,8 @@
          (struct-out text-response)
          (struct-out html-response)
          (struct-out json-response)
-         (struct-out xml-response))
+         (struct-out xml-response)
+	 (struct-out image-response))
 
 (define JSON-HEADERS '("Accept: application/json"
                        "Content-Type: application/json"))
@@ -60,6 +63,7 @@
 (define XML-HEADERS '("Accept: application/xml"))
 (define TEXT-HEADERS '("Accept: text/plain; charset=utf-8"))
 (define POST-FORM '("Content-Type: application/x-www-formurlencoded"))
+(define IMAGE-HEADERS '("Accept: image/*"))
 
 ;; Responses are packed into structs to allow easy matching
 
@@ -67,6 +71,7 @@
 (struct html-response (status headers body) #:transparent)
 (struct json-response (status headers body) #:transparent)
 (struct xml-response (status headers body) #:transparent)
+(struct image-response (status headers body) #:transparent)
 
 ;; Requesters carry context for HTTP calls (host, ssl?, default headers...)
 (struct requester (host headers port ssl type) #:transparent)
@@ -77,6 +82,7 @@
 (define json-requester (requester "" JSON-HEADERS #f #f 'json))
 (define xml-requester (requester "" XML-HEADERS #f #f 'xml))
 (define text-requester (requester "" TEXT-HEADERS #f #f 'text))
+(define image-requester (requester "" IMAGE-HEADERS #f #f 'image))
 
 ;; Header utilities
 ;; ================
@@ -86,7 +92,8 @@
     [(json-response? resp) (json-response-headers resp)]
     [(html-response? resp) (html-response-headers resp)]
     [(xml-response? resp) (xml-response-headers resp)]
-    [(text-response? resp) (text-response-headers resp)]))
+    [(text-response? resp) (text-response-headers resp)]
+    [(image-response? resp) (image-response-headers resp)]))
 
 ;; Convert header list into immutable hash
 (define (map-headers headers)
@@ -159,7 +166,8 @@
     [(json-response? resp) (json-response-status resp)]
     [(html-response? resp) (html-response-status resp)]
     [(xml-response? resp) (xml-response-status resp)]
-    [(text-response? resp) (text-response-status resp)]))
+    [(text-response? resp) (text-response-status resp)]
+    [(image-response? resp) (image-response-status resp)]))
 
 (define (get-status-code resp)
   (let ([status (get-status resp)])
@@ -170,7 +178,8 @@
     [(json-response? resp) "json"]
     [(html-response? resp) "html"]
     [(xml-response? resp) "xml"]
-    [(text-response? resp) "text"]))
+    [(text-response? resp) "text"]
+    [(image-response? resp) "image"]))
 
 ;; HTTP Status Predicates
 ;; https://www.iana.org/assignments/http-status-codes/http-status-codes.xhtml
@@ -213,6 +222,7 @@
     [(regexp #rx"application/json") 'json]
     [(regexp #rx"text/html") 'html]
     [(regexp #rx"application/xml") 'xml]
+    [(regexp #rx"image") 'image]
     [else 'text]))
 
 ;; Raise an error with the response
@@ -230,6 +240,7 @@
                  [(eq? type 'json) (read-json response)]
                  [(eq? type 'html) (html->xexp response)]
                  [(eq? type 'xml) (read-xml response)]
+		 [(eq? type 'image) (image-response-headers response)]
                  [else (port->string response)])])
     (raise
      (exn:fail:network:http:error
@@ -248,6 +259,7 @@
         [(eq? type 'json) (read-json body)]
         [(eq? type 'html) (html->xexp body)]
         [(eq? type 'xml) (read-xml body)]
+	[(eq? type 'image) (error "parse-http-error-body")] ;; FIXME
         [else (port->string body)])))
 
 ;; Uses Content-Type to determine how to parse response data
@@ -261,6 +273,8 @@
          (html-response status headers (html->xexp response))]
         [(eq? type 'xml)
          (xml-response status headers (read-xml response))]
+	[(eq? type 'image)
+	 (image-response status headers (port->bytes response))] ;; FIXME
         [else
          (text-response status headers (port->string response))]))))
 
@@ -274,6 +288,7 @@
       [(eq? type 'json) "application/json"]
       [(eq? type 'xml) "text/xml"]
       [(eq? type 'text) "text/plain"]
+      [(eq? type 'image) "image/*"]
       [else "*"])))
 
 ; Compare the Accept header from the request to the Content-Type header in the
